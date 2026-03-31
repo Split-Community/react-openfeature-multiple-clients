@@ -1,17 +1,29 @@
 # react-openfeature-multiple-clients
 
-Example Vite + React app for **[Split](https://www.split.io/) / [Harness FME](https://developer.harness.io/docs/feature-management-experimentation/)** showing how to use **OpenFeature** with **one** registered provider and **multiple named clients** in the same page.
+Vite + React example for **[Split](https://www.split.io/) / [Harness FME](https://developer.harness.io/docs/feature-management-experimentation/)** with **OpenFeature**: two named clients (`anon-web`, `user-web`) on one page.
 
 **Repository:** [github.com/Split-Community/react-openfeature-multiple-clients](https://github.com/Split-Community/react-openfeature-multiple-clients)
 
-**Pattern:** `OpenFeature.setProvider(myProvider)` once, then `OpenFeature.getClient('anon-web')` and `OpenFeature.getClient('user-web')`, each subtree wrapped in `<OpenFeatureProvider client={…}>`. The anonymous shell uses evaluation context `targetingKey: 'anonymous'`; after “Sign in”, the inner tree uses `targetingKey: 'user-1'`. Evaluations go through the [Harness OpenFeature provider for React](https://developer.harness.io/docs/feature-management-experimentation/sdks-and-infrastructure/openfeature/react-sdk/) (`@splitsoftware/openfeature-web-split-provider` + `@splitsoftware/splitio-browserjs`).
+Uses the [Harness OpenFeature provider for React](https://developer.harness.io/docs/feature-management-experimentation/sdks-and-infrastructure/openfeature/react-sdk/) (`@splitsoftware/openfeature-web-split-provider` + `@splitsoftware/splitio-browserjs`).
+
+---
+
+## Why `openfeature-bootstrap.ts`?
+
+[`src/main.tsx`](src/main.tsx) runs **`bootstrapOpenFeature()` before `createRoot(…).render`** so three problems do not show up on first paint:
+
+1. **Provider readiness** — Until Split finishes initializing, OpenFeature can be `NOT_READY` and flag hooks error. `setProviderAndWait` waits for each domain provider before the UI mounts.
+
+2. **Domain context timing** — `useContextMutator().setContext` runs in `useEffect`, which is *after* the first render. If you read flags immediately, OpenFeature may log “Unable to find context” for `anon-web` / `user-web` and evaluations can misbehave. Bootstrap calls `OpenFeature.setContext(domain, …)` up front so context exists before any hook runs.
+
+3. **Split customer keys** — One `OpenFeatureSplitProvider` shares a single Split SDK client; changing OpenFeature `targetingKey` alone does not switch that client for `getTreatment`. This app registers **one OpenFeature provider per domain**, each with its own `SplitFactory` `core.key` (`anonymous` vs `user-1`), so anonymous and signed-in panels actually hit Split as different users.
 
 ---
 
 ## Prerequisites
 
-- **Node.js** (LTS) and npm
-- A **browser (client-side) SDK key** from Harness FME / Split for the environment where you will define flags
+- Node.js (LTS) and npm  
+- A **browser (client-side)** SDK key from Harness FME / Split  
 
 ---
 
@@ -23,62 +35,46 @@ cd react-openfeature-multiple-clients
 npm install
 ```
 
-Dependencies (`@openfeature/react-sdk`, `@openfeature/web-sdk`, Split OpenFeature provider, Split browser SDK, React, Vite) are resolved from the **public npm registry**.
+---
+
+## Step 2 — Browser SDK key
+
+**Preferred:** `.env.local` in the project root:
+
+```bash
+VITE_SPLIT_BROWSER_KEY=your-client-side-sdk-key
+```
+
+Restart `npm run dev` after editing env files.
+
+**Or** set the fallback in [`src/openfeature-bootstrap.ts`](src/openfeature-bootstrap.ts) (`authKey` / `<YOUR_AUTHORIZATION_KEY>`).
+
+Do not commit real keys to a public repo.
 
 ---
 
-## Step 2 — Configure your browser SDK key
+## Step 3 — Feature flags in Harness
 
-1. Open [`src/App.tsx`](src/App.tsx).
-2. Find `AUTHORIZATION_KEY` next to `SplitFactory`.
-3. Set your **client-side** SDK key:
+| Flag key    | UI area           | OpenFeature domain |
+| ----------- | ----------------- | ------------------ |
+| `anon-flag` | Anonymous panel   | `anon-web`         |
+| `user-flag` | Signed-in panel   | `user-web`         |
 
-   ```ts
-   const AUTHORIZATION_KEY = '<paste-your-browser-sdk-key-here>';
-   ```
-
-Never commit production keys to a public repo. Prefer environment variables (e.g. Vite `import.meta.env.VITE_*`) and `.env.local` (gitignored) if you extend this sample.
-
-`SplitFactory` uses `core.key: 'anonymous'` as the initial Split customer id; OpenFeature `targetingKey` is set per subtree via `useContextMutator().setContext` (see comments in `App.tsx`).
+Create both in the environment that matches your browser key. String treatments work with `useFlag(…, defaultString)`.
 
 ---
 
-## Step 3 — Create feature flags in Harness FME
-
-The UI reads two **string** flags (keys must match exactly):
-
-| Flag key    | Panel                 | OpenFeature client domain |
-| ----------- | --------------------- | ------------------------- |
-| `anon-flag` | Anonymous shell       | `anon-web`                |
-| `user-flag` | Signed-in user        | `user-web`                |
-
-In the environment tied to your browser SDK key:
-
-1. Create flags **`anon-flag`** and **`user-flag`** (or change the keys in `App.tsx` to match your existing flags).
-2. Use string treatments compatible with `useFlag(flagKey, defaultString)`.
-3. Optionally target using evaluation context: anonymous tree uses `targetingKey: 'anonymous'`; signed-in tree uses `targetingKey: 'user-1'`.
-
-If a flag is missing or Split returns `control`, OpenFeature may surface an evaluation error; the UI shows a default string and a **resolution note** when `isError` is true.
-
----
-
-## Step 4 — Run the app
+## Step 4 — Run
 
 ```bash
 npm run dev
 ```
 
-Open the URL Vite prints (usually `http://localhost:5173`).
-
-1. Check the **Anonymous shell** panel for `anon-flag`.
-2. Click **Sign in** to mount the inner `user-web` provider and the **Signed-in user** panel for `user-flag`.
-3. Click **Sign out** to unmount the inner tree.
-
-**Debugging:** In development, `App.tsx` enables `OpenFeature.setLogger(console)` and diagnostic hooks. Open the browser console (show verbose/debug logs if filtered). Split is created with `debug: true`.
+In dev, bootstrap also enables `OpenFeature.setLogger(console)`, lightweight evaluation hooks, and Split `debug` on the factories. Use the browser console (show verbose logs if needed).
 
 ---
 
-## Step 5 — Production build (optional)
+## Step 5 — Build (optional)
 
 ```bash
 npm run build
@@ -87,11 +83,12 @@ npm run preview
 
 ---
 
-## Optional: run from the OpenFeature `js-sdk` monorepo
+## Optional: inside the OpenFeature `js-sdk` monorepo
 
-If you still have this app under `examples/nested-openfeature-providers` inside [open-feature/js-sdk](https://github.com/open-feature/js-sdk), install from the monorepo root, then:
+From [open-feature/js-sdk](https://github.com/open-feature/js-sdk) root:
 
 ```bash
+npm install
 npm run dev --workspace=react-openfeature-multiple-clients
 ```
 

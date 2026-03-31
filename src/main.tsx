@@ -1,17 +1,22 @@
-/**
- * @file Vite entry: mounts App. OpenFeature provider registration lives in App.tsx so it runs when
- * that module loads, before the first hook evaluation.
- */
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { bootstrapOpenFeature } from './openfeature-bootstrap';
 
 const el = document.getElementById('root');
 if (!el) {
   throw new Error('Missing #root');
 }
-createRoot(el).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+
+void bootstrapOpenFeature()
+  .then(() => {
+    createRoot(el).render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+  })
+  .catch((err: unknown) => {
+    console.error(err);
+    el.textContent = 'Feature flags failed to initialize. Check the console and your SDK key.';
+  });
