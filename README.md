@@ -16,7 +16,31 @@ Uses the [Harness OpenFeature provider for React](https://developer.harness.io/d
 
 2. **Domain context timing** — `useContextMutator().setContext` runs in `useEffect`, which is *after* the first render. If you read flags immediately, OpenFeature may log “Unable to find context” for `anon-web` / `user-web` and evaluations can misbehave. Bootstrap calls `OpenFeature.setContext(domain, …)` up front so context exists before any hook runs.
 
-3. **Split customer keys** — One `OpenFeatureSplitProvider` shares a single Split SDK client; changing OpenFeature `targetingKey` alone does not switch that client for `getTreatment`. This app registers **one OpenFeature provider per domain**, each with its own `SplitFactory` `core.key` (`anonymous` vs `user-1`), so anonymous and signed-in panels actually hit Split as different users.
+3. **Efficient resource usage** — The app creates **one shared Split factory** and registers **two OpenFeature providers** (one per domain) that share it. When context changes via `setContext({ targetingKey: newUserId })`, the provider internally calls `factory.client(newUserId)` to get the appropriate Split client. This avoids duplicating network connections, caches, and storage.
+
+## Architecture Best Practices
+
+- **One `SplitFactory`** shared by multiple providers (efficient)
+- **Two OpenFeature domains** for simultaneous evaluation of different users
+- **Static context** (anonymous) set once in bootstrap
+- **Dynamic context** (user) updated via `setContext()` when user ID changes
+
+**What to avoid:**
+- Creating multiple `SplitFactory` instances (wastes resources: 2x network, memory, storage)
+- Using `setContext()` in React for static values already set in bootstrap (unnecessary)
+- Forgetting that `factory.client(key)` shares the factory infrastructure efficiently
+
+## When to Use `setContext()`
+
+| Scenario | Approach | Example |
+|----------|----------|---------|
+| **Static user key** (won't change) | Set in bootstrap only | Anonymous users always with key `”anonymous”` |
+| **Dynamic user key** (changes at runtime) | Use `setContext()` in React `useEffect` | User signs in, changes account, switches profile |
+| **Multiple simultaneous users** | Multiple domains/providers, each with own context | Show flags for anonymous AND logged-in user on same page |
+
+**In this demo:**
+- `anon-web` domain → static context (`”anonymous”`), set in bootstrap
+- `user-web` domain → dynamic context (changes via input field), updated with `setContext()`
 
 ---
 
@@ -55,12 +79,17 @@ Do not commit real keys to a public repo.
 
 ## Step 3 — Feature flags in Harness
 
-| Flag key    | UI area           | OpenFeature domain |
-| ----------- | ----------------- | ------------------ |
-| `anon-flag` | Anonymous panel   | `anon-web`         |
-| `user-flag` | Signed-in panel   | `user-web`         |
+| Flag key    | UI area           | OpenFeature domain | Split customer key |
+| ----------- | ----------------- | ------------------ | ------------------ |
+| `anon-flag` | Anonymous panel   | `anon-web`         | `anonymous` (static) |
+| `user-flag` | Signed-in panel   | `user-web`         | Dynamic (e.g., `user-1`, `user-2`) |
 
-Create both in the environment that matches your browser key. String treatments work with `useFlag(…, defaultString)`.
+Create both in the environment that matches your browser key.
+
+**Try targeting by key:**
+- Set `anon-flag` to `"on"` for key = `"anonymous"`
+- Set `user-flag` to `"premium"` for key = `"user-1"`, `"basic"` for `"user-2"`
+- Change the User ID input in the UI to see different treatments
 
 ---
 
