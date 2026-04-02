@@ -9,12 +9,19 @@ import { SplitFactory } from '@splitsoftware/splitio-browserjs';
 const authKey =
   (import.meta.env.VITE_SPLIT_BROWSER_KEY as string | undefined)?.trim() || '<YOUR_AUTHORIZATION_KEY>';
 
-async function registerSplitDomain(domain: string, splitCustomerKey: string): Promise<void> {
-  const factory = SplitFactory({
-    core: { authorizationKey: authKey, key: splitCustomerKey },
+/**
+ * Creates a SINGLE shared Split factory to avoid duplicating resources.
+ * Multiple providers can share the same factory - each provider will call
+ * factory.client(targetingKey) internally based on context.
+ */
+function createSharedFactory() {
+  return SplitFactory({
+    core: {
+      authorizationKey: authKey,
+      key: 'bootstrap-key' // Initial key, will be overridden by context
+    },
     debug: Boolean(import.meta.env.DEV),
   });
-  await OpenFeature.setProviderAndWait(domain, new OpenFeatureSplitProvider(factory));
 }
 
 /** Call from `main.tsx` before `createRoot(…).render` so flags are safe to read on first paint. */
@@ -35,8 +42,17 @@ export async function bootstrapOpenFeature(): Promise<void> {
     OpenFeature.addHooks(hook);
   }
 
-  await registerSplitDomain('anon-web', 'anonymous');
-  await registerSplitDomain('user-web', 'user-1');
+  // ONE shared factory for efficiency (shared network, cache, storage)
+  const sharedFactory = createSharedFactory();
+
+  // Register two providers (one per domain) that share the same factory
+  // Each provider will internally call factory.client(targetingKey) based on context
+  await OpenFeature.setProviderAndWait('anon-web', new OpenFeatureSplitProvider(sharedFactory));
+  await OpenFeature.setProviderAndWait('user-web', new OpenFeatureSplitProvider(sharedFactory));
+
+  // Set initial context for anonymous domain (static, won't change)
   await OpenFeature.setContext('anon-web', { targetingKey: 'anonymous' });
+
+  // Initial context for user domain (will be updated dynamically in React components)
   await OpenFeature.setContext('user-web', { targetingKey: 'user-1' });
 }
